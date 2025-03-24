@@ -4,7 +4,11 @@
       "user": {
         "data": {
           "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "password": "[%key:common::config_flow::data::password%]",
+          "create_pet_select": "Create a select entity for each pet's location"
+        },
+        "data_description": {
+          "create_pet_select": "This is especially useful if you have multiple flaps that do not directly lead outside"
         }
       },
       "reauth_confirm": {
@@ -13,12 +17,34 @@
         "data": {
           "password": "[%key:common::config_flow::data::password%]"
         }
+      },
+      "pet_select_config": {
+        "title": "Pet flaps' entry/exit to zones mapping",
+        "description": "Link your pet flaps' entry and exit points to the desired zones. You can either select one of your areas or enter a custom zone name.",
+        "sections": {
+          "flap": {
+            "name": "Flap \"{flap_name}\"",
+            "data": {
+              "entry": "Entry",
+              "exit": "Exit"
+            }
+          },
+          "manually_set_location": {
+            "name": "Manually set location",
+            "description": "If the pet location was changed manually through the Sure Petcare app",
+            "data": {
+              "exit": "Outside",
+              "entry": "Inside"
+            }
+          }
+        }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "unknown": "[%key:common::config_flow::error::unknown%]",
+      "no_zones_selected": "Please select or enter a zone for each entry and exit."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_account%]",
