@@ -46,7 +46,12 @@ from .core import (
     HomeAssistant,
     callback,
 )
-from .data_entry_flow import FLOW_NOT_COMPLETE_STEPS, FlowContext, FlowResult
+from .data_entry_flow import (
+    FLOW_NOT_COMPLETE_STEPS,
+    FlowContext,
+    FlowResult,
+    TranslationFieldMapping,
+)
 from .exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryError,
@@ -3244,6 +3249,7 @@ class ConfigFlow(ConfigEntryBaseFlow):
         description_placeholders: Mapping[str, str] | None = None,
         last_step: bool | None = None,
         preview: str | None = None,
+        translation_field_mappings: Mapping[str, TranslationFieldMapping] | None = None,
     ) -> ConfigFlowResult:
         """Return the definition of a form to gather user input.
 
@@ -3264,6 +3270,7 @@ class ConfigFlow(ConfigEntryBaseFlow):
             description_placeholders=description_placeholders,
             last_step=last_step,
             preview=preview,
+            translation_field_mappings=translation_field_mappings,
         )
 
     def is_matching(self, other_flow: Self) -> bool:
