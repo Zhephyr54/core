@@ -138,10 +138,12 @@ def setup_overkiz_integration(
     async def _setup(
         *,
         fixture: str = DEFAULT_SETUP_FIXTURE,
+        api_type: APIType = APIType.CLOUD,
     ) -> MockConfigEntry:
         mock_config_entry.add_to_hass(hass)
 
         mock_client.set_setup_fixture(fixture)
+        mock_client.server_config.api_type = api_type
 
         with (
             patch(

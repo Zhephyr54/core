@@ -1,13 +1,15 @@
 """Helpers to help coordinate updates."""
 
+import asyncio
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import ClientConnectorError, ServerDisconnectedError
 from pyoverkiz.client import OverkizClient
-from pyoverkiz.enums import EventName, ExecutionState, Protocol
+from pyoverkiz.enums import APIType, EventName, ExecutionState, Protocol
 from pyoverkiz.exceptions import (
     BadCredentialsError,
     InvalidEventListenerIdError,
@@ -18,6 +20,7 @@ from pyoverkiz.exceptions import (
     TooManyRequestsError,
 )
 from pyoverkiz.models import (
+    Action,
     Device,
     DeviceEvent,
     DeviceRemovedEvent,
@@ -37,6 +40,20 @@ if TYPE_CHECKING:
     from . import OverkizDataConfigEntry
 
 from .const import DOMAIN, IGNORED_OVERKIZ_DEVICES, LOGGER, UPDATE_INTERVAL
+
+COMMAND_QUEUE_DELAY = 0.2
+
+type OverkizExecutionAction = dict[str, str]
+
+
+@dataclass(slots=True)
+class _QueuedCommand:
+    """Command queued to be sent as part of one action group."""
+
+    action: Action
+    refresh_afterwards: bool
+    future: asyncio.Future[str]
+
 
 # Events are a discriminated union; each handler narrows to its own subtype.
 EVENT_HANDLERS: Registry[
@@ -72,7 +89,8 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self.data = {}
         self.client = client
         self.devices: dict[str, Device] = {d.device_url: d for d in devices}
-        self.executions: dict[str, dict[str, str]] = {}
+        self.executions: dict[str, list[OverkizExecutionAction]] = {}
+        self.command_queue = OverkizCommandQueue(self)
         self.areas = self._places_to_area(places) if places else None
         self._default_update_interval = UPDATE_INTERVAL
 
@@ -150,6 +168,87 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
         self.update_interval = update_interval
         self._default_update_interval = update_interval
 
+    def register_execution(
+        self, exec_id: str, actions: list[OverkizExecutionAction]
+    ) -> None:
+        """Register execution metadata initiated via Home Assistant."""
+        self.executions[exec_id] = actions
+
+
+class OverkizCommandQueue:
+    """Queue local API commands and send them in one action group."""
+
+    def __init__(self, coordinator: OverkizDataUpdateCoordinator) -> None:
+        """Initialize the queue."""
+        self.coordinator = coordinator
+        self._pending: list[_QueuedCommand] = []
+        self._flush_task: asyncio.Task[None] | None = None
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether this queue should batch commands."""
+        return self.coordinator.client.server_config.api_type == APIType.LOCAL
+
+    async def async_execute(
+        self, action: Action, refresh_afterwards: bool
+    ) -> str:
+        """Queue a command and wait for the next flush."""
+        future = self.coordinator.hass.loop.create_future()
+        self._pending.append(_QueuedCommand(action, refresh_afterwards, future))
+
+        if self._flush_task is None:
+            self._flush_task = self.coordinator.hass.async_create_task(
+                self._async_flush()
+            )
+
+        return await future
+
+    async def _async_flush(self) -> None:
+        """Flush queued commands after a short debounce window."""
+        queued: list[_QueuedCommand] = []
+        try:
+            await asyncio.sleep(COMMAND_QUEUE_DELAY)
+            queued = self._pending
+            self._pending = []
+
+            actions = [command.action for command in queued]
+            exec_id = await self.coordinator.client.execute_action_group(
+                label="Home Assistant",
+                actions=actions,
+            )
+            self.coordinator.register_execution(
+                exec_id,
+                [
+                    {
+                        "device_url": action.device_url,
+                        "command_name": command.name,
+                    }
+                    for action in actions
+                    for command in action.commands
+                ],
+            )
+
+            if any(command.refresh_afterwards for command in queued):
+                await self.coordinator.async_refresh()
+
+            for command in queued:
+                if not command.future.done():
+                    command.future.set_result(exec_id)
+        except Exception as exception:
+            failed = queued or self._pending
+            if not queued:
+                self._pending = []
+
+            for command in failed:
+                if not command.future.done():
+                    command.future.set_exception(exception)
+        finally:
+            self._flush_task = None
+            if self._pending:
+                self._flush_task = self.coordinator.hass.async_create_task(
+                    self._async_flush()
+                )
+
 
 @EVENT_HANDLERS.register(EventName.DEVICE_AVAILABLE)
 async def on_device_available(
@@ -217,7 +316,7 @@ async def on_execution_registered(
 ) -> None:
     """Handle execution registered event."""
     if event.exec_id not in coordinator.executions:
-        coordinator.executions[event.exec_id] = {}
+        coordinator.executions[event.exec_id] = []
 
     if not coordinator.is_stateless:
         coordinator.update_interval = timedelta(seconds=1)

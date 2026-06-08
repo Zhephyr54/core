@@ -99,15 +99,20 @@ class OverkizExecutor:
         ):
             parameters.append(0)
 
+        action = Action(
+            device_url=self.device.device_url,
+            commands=[Command(name=command_name, parameters=parameters)],
+        )
+
         try:
+            if self.coordinator.command_queue.enabled:
+                await self.coordinator.command_queue.async_execute(
+                    action, refresh_afterwards
+                )
+                return
+
             exec_id = await self.coordinator.client.execute_action_group(
-                label="Home Assistant",
-                actions=[
-                    Action(
-                        device_url=self.device.device_url,
-                        commands=[Command(name=command_name, parameters=parameters)],
-                    )
-                ],
+                label="Home Assistant", actions=[action]
             )
         # Catch Overkiz exceptions to support `continue_on_error` functionality
         except BaseOverkizError as exception:
@@ -115,10 +120,10 @@ class OverkizExecutor:
 
         # ExecutionRegisteredEvent doesn't contain the
         # device_url, thus we need to register it here
-        self.coordinator.executions[exec_id] = {
-            "device_url": self.device.device_url,
-            "command_name": command_name,
-        }
+        self.coordinator.register_execution(
+            exec_id,
+            [{"device_url": self.device.device_url, "command_name": command_name}],
+        )
         if refresh_afterwards:
             await self.coordinator.async_refresh()
 
@@ -130,39 +135,43 @@ class OverkizExecutor:
         # Cancel a running execution. Retrieve executions
         # initiated via Home Assistant from Data Update
         # Coordinator queue
-        exec_id = next(
-            (
-                exec_id
-                # Reverse dictionary to cancel the last added execution
-                for exec_id, execution in reversed(self.coordinator.executions.items())
-                if execution.get("device_url") == self.device.device_url
-                and execution.get("command_name") in commands_to_cancel
-            ),
-            None,
-        )
+        # Reverse dictionary to cancel the last added execution
+        for exec_id, execution in reversed(self.coordinator.executions.items()):
+            if not any(
+                action["device_url"] == self.device.device_url
+                and action["command_name"] in commands_to_cancel
+                for action in execution
+            ):
+                continue
 
-        if exec_id:
-            await self.async_cancel_execution(exec_id)
-            return True
+            if len(execution) == 1:
+                await self.async_cancel_execution(exec_id)
+                return True
+
+            return False
 
         # Retrieve executions initiated outside Home Assistant via API
         executions = await self.coordinator.client.get_current_executions()
-        exec_id = next(
-            (
-                execution.id
-                for execution in executions
-                if execution.action_group
-                for action in reversed(execution.action_group.actions)
-                for command in action.commands
-                if action.device_url == self.device.device_url
-                and command.name in commands_to_cancel
-            ),
-            None,
-        )
+        for execution in executions:
+            if not execution.action_group:
+                continue
 
-        if exec_id:
-            await self.async_cancel_execution(exec_id)
-            return True
+            action_group = execution.action_group
+            command_count = sum(
+                len(action.commands) for action in action_group.actions
+            )
+
+            if any(
+                action.device_url == self.device.device_url
+                and command.name in commands_to_cancel
+                for action in reversed(action_group.actions)
+                for command in action.commands
+            ):
+                if command_count == 1:
+                    await self.async_cancel_execution(execution.id)
+                    return True
+
+                return False
 
         return False
 
