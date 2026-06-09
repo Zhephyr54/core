@@ -8,7 +8,8 @@ from pyoverkiz.auth.credentials import (
     LocalTokenCredentials,
     UsernamePasswordCredentials,
 )
-from pyoverkiz.client import OverkizClient
+from pyoverkiz.action_queue import ActionQueueSettings
+from pyoverkiz.client import OverkizClient, OverkizClientSettings
 from pyoverkiz.enums import APIType, OverkizState, Server, UIClass, UIWidget
 from pyoverkiz.exceptions import (
     BadCredentialsError,
@@ -53,7 +54,6 @@ from .coordinator import OverkizDataUpdateCoordinator
 from .services import async_setup_services
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-
 
 @dataclass
 class HomeAssistantOverkizData:
@@ -287,6 +287,7 @@ def create_local_client(
         credentials=LocalTokenCredentials(token),
         session=session,
         verify_ssl=verify_ssl,
+        settings=OverkizClientSettings(action_queue=ActionQueueSettings()),
     )
 
 
@@ -302,4 +303,5 @@ def create_cloud_client(
         server=server,
         credentials=UsernamePasswordCredentials(username, password),
         session=session,
+        settings=OverkizClientSettings(action_queue=ActionQueueSettings()),
     )

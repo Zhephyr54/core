@@ -38,7 +38,10 @@ def assert_command_call(
     assert len(actions) == 1
     assert actions[0].device_url == device_url
     assert actions[0].commands[0].name == command_name
-    assert actions[0].commands[0].parameters == (parameters or [])
+    if parameters is None:
+        assert actions[0].commands[0].parameters in (None, [])
+    else:
+        assert actions[0].commands[0].parameters == parameters
 
 
 def device_state_changed_event(

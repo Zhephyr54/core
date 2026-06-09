@@ -1,5 +1,11 @@
 """Tests for Overkiz integration init."""
 
+from unittest.mock import patch
+
+from pyoverkiz.action_queue import ActionQueueSettings
+from pyoverkiz.client import OverkizClientSettings
+
+from homeassistant.components.overkiz import create_cloud_client, create_local_client
 from homeassistant.components.overkiz.const import DOMAIN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -16,6 +22,30 @@ ENTITY_SENSOR_TARGET_CLOSURE_STATE = "sensor.zipscreen_woonkamer_target_closure_
 ENTITY_SENSOR_TARGET_CLOSURE_STATE_2 = (
     "sensor.zipscreen_woonkamer_target_closure_state_2"
 )
+
+
+def _assert_action_queue_settings(settings: OverkizClientSettings) -> None:
+    """Assert action queue settings are enabled."""
+    assert isinstance(settings.action_queue, ActionQueueSettings)
+    assert settings.action_queue.delay == 0.1
+    assert settings.action_queue.max_actions == 20
+    assert settings.default_rts_command_duration is None
+
+
+async def test_create_local_client_enables_action_queue(hass: HomeAssistant) -> None:
+    """Test local clients enable pyoverkiz action queue."""
+    with patch("homeassistant.components.overkiz.OverkizClient") as client_class:
+        create_local_client(hass, "gateway.local", "token", True)
+
+    _assert_action_queue_settings(client_class.call_args.kwargs["settings"])
+
+
+async def test_create_cloud_client_enables_action_queue(hass: HomeAssistant) -> None:
+    """Test cloud clients enable pyoverkiz action queue."""
+    with patch("homeassistant.components.overkiz.OverkizClient") as client_class:
+        create_cloud_client(hass, TEST_EMAIL, TEST_PASSWORD, TEST_SERVER)
+
+    _assert_action_queue_settings(client_class.call_args.kwargs["settings"])
 
 
 async def test_unique_id_migration(hass: HomeAssistant) -> None:

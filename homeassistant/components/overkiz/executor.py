@@ -101,16 +101,10 @@ class OverkizExecutor:
 
         action = Action(
             device_url=self.device.device_url,
-            commands=[Command(name=command_name, parameters=parameters)],
+            commands=[Command(name=command_name, parameters=parameters or None)],
         )
 
         try:
-            if self.coordinator.command_queue.enabled:
-                await self.coordinator.command_queue.async_execute(
-                    action, refresh_afterwards
-                )
-                return
-
             exec_id = await self.coordinator.client.execute_action_group(
                 label="Home Assistant", actions=[action]
             )
@@ -124,7 +118,7 @@ class OverkizExecutor:
             exec_id,
             [{"device_url": self.device.device_url, "command_name": command_name}],
         )
-        if refresh_afterwards:
+        if refresh_afterwards and self.coordinator.mark_execution_refreshed(exec_id):
             await self.coordinator.async_refresh()
 
     async def async_cancel_command(
